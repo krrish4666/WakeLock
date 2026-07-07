@@ -8,6 +8,8 @@ class PlanStatus(str, enum.Enum):
     ACTIVE = "ACTIVE"
     COMPLETED = "COMPLETED"
     WITHDRAWN = "WITHDRAWN"
+    EXHAUSTED = "EXHAUSTED"
+    CANCELLED = "CANCELLED"
 
 class SessionStatus(str, enum.Enum):
     PENDING = "PENDING"
@@ -32,9 +34,14 @@ class AccountabilityPlan(Base):
     days_verified = Column(Integer, default=0)
     days_missed = Column(Integer, default=0)
     
-    
     status = Column(Enum(PlanStatus), default=PlanStatus.ACTIVE)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    @property
+    def duration_days(self) -> int:
+        if self.start_date and self.end_date:
+            return (self.end_date - self.start_date).days
+        return 0
 
     # Relationships
     user = relationship("User", back_populates="plans")

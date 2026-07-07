@@ -64,3 +64,79 @@ class PlanService:
         await db.commit()
         await db.refresh(new_plan)
         return new_plan
+
+    @staticmethod
+    async def evaluate_plan_status(db: AsyncSession, plan: AccountabilityPlan) -> PlanStatus:
+        """
+        Evaluates an active plan after a verification or failure event.
+        Transitions to EXHAUSTED if remaining balance cannot cover a penalty.
+        Transitions to COMPLETED if all duration days are accounted for.
+        Releases any leftover locked funds (dust) back to available_balance.
+        """
+        if plan.status != PlanStatus.ACTIVE:
+            return plan.status
+            
+        # Check Exhaustion
+        if Decimal(str(plan.remaining_balance)) < Decimal(str(plan.per_day_penalty)):
+            plan.status = PlanStatus.EXHAUSTED
+            
+            # Release any leftover dust from locked to available balance
+            wallet = await WalletService.get_or_create_wallet(db, plan.user_id)
+            if wallet and Decimal(str(wallet.locked_balance)) > 0:
+                dust = Decimal(str(wallet.locked_balance))
+                wallet.available_balance = Decimal(str(wallet.available_balance)) + dust
+                wallet.locked_balance = Decimal("0.00")
+                
+                WalletService.record_transaction(
+                    db=db,
+                    wallet=wallet,
+                    tx_type=TransactionType.WITHDRAWAL,
+                    amount=dust,
+                    reference_id=plan.id
+                )
+            plan.remaining_balance = Decimal("0.00")
+            
+            from app.bot import send_alert
+            try:
+                await send_alert(
+                    plan.user_id,
+                    f"⚠️ WAKELOCK PLAN EXHAUSTED ⚠️\n\n"
+                    f"Your plan (ID: {plan.id}) has run out of funds to cover penalties.\n"
+                    f"Status changed to EXHAUSTED. Any leftover locked dust has been returned to your available balance."
+                )
+            except Exception:
+                pass
+            return PlanStatus.EXHAUSTED
+            
+        # Check Completion
+        if (plan.days_verified + plan.days_missed) >= plan.duration_days:
+            plan.status = PlanStatus.COMPLETED
+            
+            # Release all remaining locked balance back to available balance
+            wallet = await WalletService.get_or_create_wallet(db, plan.user_id)
+            if wallet and Decimal(str(wallet.locked_balance)) > 0:
+                remaining = Decimal(str(wallet.locked_balance))
+                wallet.available_balance = Decimal(str(wallet.available_balance)) + remaining
+                wallet.locked_balance = Decimal("0.00")
+                
+                WalletService.record_transaction(
+                    db=db,
+                    wallet=wallet,
+                    tx_type=TransactionType.WITHDRAWAL,
+                    amount=remaining,
+                    reference_id=plan.id
+                )
+                
+            from app.bot import send_alert
+            try:
+                await send_alert(
+                    plan.user_id,
+                    f"🎉 WAKELOCK PLAN COMPLETED! 🎉\n\n"
+                    f"Congratulations! You completed your {plan.duration_days}-day accountability plan.\n"
+                    f"All remaining locked funds (Rs. {plan.remaining_balance}) have been unlocked to your available balance!"
+                )
+            except Exception:
+                pass
+            return PlanStatus.COMPLETED
+            
+        return PlanStatus.ACTIVE

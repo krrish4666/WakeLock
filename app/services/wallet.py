@@ -134,6 +134,8 @@ class WalletService:
         if plan:
             plan.days_missed += 1
             plan.remaining_balance = Decimal(str(plan.remaining_balance)) - Decimal(str(penalty_amount))
+            from app.services.plan import PlanService
+            await PlanService.evaluate_plan_status(db, plan)
             
         # We do NOT commit here because VerificationService batches the penalty execution
         # but we must flush to reflect ledger entry

@@ -63,6 +63,8 @@ class VerificationService:
                 rec.processed_flag = True
                 plan = await db.get(AccountabilityPlan, rec.plan_id)
                 plan.days_verified += 1
+                from app.services.plan import PlanService
+                await PlanService.evaluate_plan_status(db, plan)
                 await db.commit()
                 return "[SUCCESS] verified!! You woke up on time. Your funds are safe today."
                     
