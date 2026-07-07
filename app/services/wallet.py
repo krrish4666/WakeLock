@@ -3,8 +3,9 @@ from sqlalchemy.future import select
 from decimal import Decimal
 from typing import Optional
 
-from app.models.wallet import Wallet, WalletTransaction, TransactionType
+from app.models.wallet import Wallet, WalletTransaction, TransactionType, PlatformRevenue
 from app.models.user import User
+from app.models.plan import AccountabilityPlan
 
 class WalletService:
     @staticmethod
@@ -100,6 +101,7 @@ class WalletService:
     async def apply_penalty(db: AsyncSession, telegram_id: int, plan_id: int, penalty_amount: Decimal) -> Optional[Wallet]:
         """
         Deducts a penalty directly from the user's locked_balance for failing to verify attendance.
+        Also records PlatformRevenue and updates AccountabilityPlan failure stats.
         """
         stmt = select(Wallet).where(Wallet.user_id == telegram_id)
         result = await db.execute(stmt)
@@ -119,6 +121,20 @@ class WalletService:
             amount=penalty_amount,
             reference_id=plan_id
         )
+        
+        # Record Platform Revenue
+        revenue = PlatformRevenue(
+            total_collected=penalty_amount,
+            source_plan_id=plan_id
+        )
+        db.add(revenue)
+        
+        # Update Plan Failure Stats
+        plan = await db.get(AccountabilityPlan, plan_id)
+        if plan:
+            plan.days_missed += 1
+            plan.remaining_balance = Decimal(str(plan.remaining_balance)) - Decimal(str(penalty_amount))
+            
         # We do NOT commit here because VerificationService batches the penalty execution
         # but we must flush to reflect ledger entry
         await db.flush()
