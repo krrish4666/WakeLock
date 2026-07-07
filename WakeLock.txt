@@ -1,0 +1,399 @@
+We are now officially locking the architecture:
+
+* ✅ Telegram-based system
+* ✅ 6-digit numeric OTP
+* ✅ Prepaid weekly/monthly plan
+* ✅ Flat per-day penalty (auto-calculated)
+* ✅ Platform keeps penalty
+* ✅ Virtual wallet (no real payment gateway required)
+* ✅ Manual withdrawal = internal unlock only
+* ❌ No Razorpay integration
+* ❌ No real payouts
+* ❌ No QR
+* ❌ No streak multipliers
+
+
+
+# WakeLock
+
+### Software Requirements & Design Specification
+
+**Version:** 4.0 (Final Locked Backend Architecture)
+**Date:** March 2026
+**Stack:** FastAPI · PostgreSQL · Redis · Celery · Telegram Bot API
+
+---
+
+# 1. Problem Statement
+
+Most wake-up systems fail because they rely entirely on self-discipline. There is no structured consequence mechanism that enforces behavioral consistency.
+
+WakeLock solves this by introducing:
+
+* Prepaid accountability cycles
+* Randomized time-window OTP verification
+* Flat per-day penalty deduction
+* Fully backend-controlled scheduling
+
+This is a backend-driven accountability enforcement engine.
+
+---
+
+# 2. Product Overview
+
+WakeLock is:
+
+> A Telegram-based prepaid accountability subscription system
+> Using time-bound numeric OTP verification
+> With deterministic financial penalties
+> Powered entirely by backend scheduling
+
+There is no standalone mobile app. Telegram acts as the lightweight interaction layer.
+
+---
+
+# 3. Subscription Plan Model
+
+## 3.1 Minimum Plan
+
+* Minimum duration: 7 days
+* Minimum amount: ₹70
+* Per-day penalty automatically calculated
+
+Formula:
+
+per_day_penalty = total_locked_amount ÷ number_of_days
+
+Example:
+
+₹70 ÷ 7 = ₹10 per missed day
+
+Users may choose:
+
+* Weekly plan
+* Monthly plan
+* Custom duration plan
+
+---
+
+# 4. Virtual Wallet System (No Real Payments)
+
+WakeLock uses a simulated internal wallet system.
+
+## 4.1 Wallet Structure
+
+Each user has:
+
+* total_balance
+* locked_balance
+* available_balance
+
+All transactions are ledger-based and stored permanently.
+
+---
+
+## 4.2 Deposit
+
+User simulates deposit via API or Telegram command.
+
+System:
+
+* Increases total_balance
+* Increases available_balance
+* Logs transaction (DEPOSIT)
+
+No external payment gateway required.
+
+---
+
+## 4.3 Plan Activation
+
+When user starts a plan:
+
+* available_balance decreases
+* locked_balance increases
+* total_amount_locked stored in AccountabilityPlan
+* Transaction logged as LOCK
+
+---
+
+## 4.4 Daily Penalty Deduction
+
+If user fails verification:
+
+* locked_balance -= per_day_penalty
+* platform_revenue += per_day_penalty
+* remaining_balance updated
+* Transaction logged as PENALTY
+
+Platform keeps penalty amount.
+
+---
+
+## 4.5 Plan Completion
+
+At end_date:
+
+* Plan marked COMPLETED
+* Remaining locked_balance remains locked
+* No auto-refund
+* No auto-renew
+
+---
+
+## 4.6 Manual Withdrawal
+
+User sends:
+
+/withdraw
+
+System:
+
+* Moves remaining locked_balance → available_balance
+* Logs UNLOCK transaction
+
+No real payout.
+Internal balance only.
+
+---
+
+# 5. Telegram-Based User Flow
+
+## 5.1 Plan Setup
+
+Bot collects:
+
+* Alarm time
+* Buffer duration (minutes)
+* OTP window duration (minutes)
+* Plan duration (days)
+
+User confirms deposit and activates plan.
+
+---
+
+# 6. Daily Verification Flow
+
+Example:
+
+Alarm Time: 5:00
+Buffer: 20 minutes
+OTP Window: 10 minutes
+
+---
+
+## 6.1 5:00 AM — Alarm Notification
+
+Telegram sends:
+
+“WakeLock Alarm ⏰
+OTP may drop between 5:20 – 5:30. Be ready.”
+
+Triggered by Celery scheduler.
+
+---
+
+## 6.2 Buffer Phase
+
+Backend calculates:
+
+buffer_end = alarm_time + buffer_duration
+
+otp_window = [buffer_end → buffer_end + otp_window_duration]
+
+---
+
+## 6.3 Random OTP Drop
+
+Backend randomly selects drop_time inside otp_window.
+
+At drop_time:
+
+Telegram sends:
+
+“WakeLock Code: 482931
+Enter within 2 minutes.”
+
+---
+
+## 6.4 OTP Rules
+
+* 6-digit numeric
+* Cryptographically random
+* Stored hashed
+* Valid for exactly 2 minutes
+* Single-use
+
+---
+
+## 6.5 Verification Outcome
+
+If correct OTP within expiry:
+→ VERIFIED
+
+If incorrect or expired:
+→ FAILED
+→ Daily penalty applied
+
+---
+
+# 7. Core Domain Model
+
+## 7.1 AccountabilityPlan
+
+Fields:
+
+* user_id
+* start_date
+* end_date
+* total_amount_locked
+* per_day_penalty
+* days_verified
+* days_missed
+* remaining_balance
+* alarm_time
+* buffer_duration_minutes
+* otp_window_minutes
+* status (ACTIVE / COMPLETED / WITHDRAWN)
+
+---
+
+## 7.2 AttendanceRecord
+
+* plan_id
+* date
+* status (PENDING / VERIFIED / FAILED)
+* otp_token_id
+* processed_flag (ensures idempotency)
+
+---
+
+## 7.3 OTPToken
+
+* plan_id
+* token_hash
+* drop_time
+* expires_at
+* is_used
+* created_at
+
+---
+
+## 7.4 PlatformRevenue
+
+* total_collected
+* date
+* source_plan_id
+
+Used to track penalty accumulation.
+
+---
+
+# 8. Attendance State Machine
+
+PENDING
+→ ALARM_SENT
+→ OTP_ACTIVE
+→ VERIFIED
+
+OR
+
+→ FAILED
+
+Once processed:
+State is immutable.
+
+---
+
+# 9. Anti-Cheat Mechanism
+
+* Randomized OTP drop
+* Short 2-minute expiry
+* Server-side scheduling only
+* No manual start button
+* Single-use tokens
+* Idempotent deduction logic
+
+Prevents:
+
+* Exact-timing exploit
+* Replay attacks
+* Multiple submissions
+* Duplicate deductions
+
+---
+
+# 10. Non-Functional Requirements
+
+* OTP generation < 200ms
+* Notification latency < 5 seconds
+* Financial operations atomic
+* Daily processing idempotent
+* System tolerant to worker restart
+* No duplicate penalty execution
+
+---
+
+# 11. Architecture Overview
+
+## Client Layer
+
+Telegram Bot Interface
+
+## API Layer
+
+FastAPI
+
+## Data Layer
+
+PostgreSQL
+
+## Cache Layer
+
+Redis (OTP TTL & expiry)
+
+## Worker Layer
+
+Celery Scheduler
+
+Handles:
+
+* Daily alarm trigger
+* Random OTP scheduling
+* Expiry processing
+* Automatic failure marking
+
+---
+
+# 12. What This Demonstrates (Interview Strength)
+
+| Skill                      | Evidence                            |
+| -------------------------- | ----------------------------------- |
+| Subscription Engine Design | Prepaid accountability model        |
+| Ledger Accounting          | Virtual wallet transaction system   |
+| Atomic Transactions        | Safe deduction logic                |
+| Idempotency                | Processed flags prevent duplication |
+| Distributed Scheduling     | Celery-based OTP drop               |
+| Security                   | Time-bound hashed OTP               |
+| State Machine Modeling     | Clear attendance transitions        |
+| Backend Architecture       | Layered service separation          |
+
+---
+
+# Final Locked Architecture Statement
+
+WakeLock is:
+
+A Telegram-driven prepaid accountability backend system
+Using randomized 6-digit OTP verification
+Flat per-day penalty model
+Virtual wallet ledger
+Platform retains penalties
+Manual internal withdrawal only
+Fully backend-controlled scheduling
+
+No external payment gateway.
+No QR.
+No real payouts.
+
+

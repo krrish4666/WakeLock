@@ -1,0 +1,27 @@
+# Virtual Environment
+venv/
+env/
+ENV/
+*.venv
+
+# Python Cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Database & Cache
+*.db
+*.sqlite
+*.sqlite3
+wakelock.db
+celerybeat-schedule*
+
+# Environment & Secrets
+.env
+.env.*
+
+# IDEs & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
