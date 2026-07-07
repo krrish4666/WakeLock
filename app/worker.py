@@ -20,6 +20,10 @@ celery_app.conf.update(
         "check-alarms-every-minute": {
             "task": "app.tasks.plan_tasks.process_due_alarms",
             "schedule": crontab(minute="*"), # Run exactly on the 0th second of every minute
+        },
+        "check-completed-plans-daily": {
+            "task": "app.tasks.plan_tasks.check_completed_plans",
+            "schedule": crontab(hour="0", minute="5"), # Run at 00:05 AM every day
         }
     }
 )

@@ -127,3 +127,13 @@ async def _process_expired_otp_async(attendance_id: int, user_id: int):
                 await send_alert(user_id, message)
             except Exception as e:
                 print(f"[WARN] Could not send Telegram alert to {user_id}: {e}")
+
+@shared_task
+def check_completed_plans():
+    """ Daily cron task to sweep and complete finished plans. """
+    asyncio.run(_check_completed_plans_async())
+
+async def _check_completed_plans_async():
+    async with AsyncSessionLocal() as db:
+        from app.services.plan import PlanService
+        await PlanService.process_completed_plans(db)

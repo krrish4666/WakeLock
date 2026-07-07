@@ -109,7 +109,9 @@ class PlanService:
             return PlanStatus.EXHAUSTED
             
         # Check Completion
-        if (plan.days_verified + plan.days_missed) >= plan.duration_days:
+        now = datetime.now()
+        end = plan.end_date.replace(tzinfo=None) if plan.end_date.tzinfo else plan.end_date
+        if (plan.days_verified + plan.days_missed) >= plan.duration_days or now >= end:
             plan.status = PlanStatus.COMPLETED
             
             # Release all remaining locked balance back to available balance
@@ -140,3 +142,17 @@ class PlanService:
             return PlanStatus.COMPLETED
             
         return PlanStatus.ACTIVE
+
+    @staticmethod
+    async def process_completed_plans(db: AsyncSession):
+        """
+        Cron sweep to check all ACTIVE plans. If their end_date is reached or duration_days completed,
+        transitions them to COMPLETED and releases remaining locked balance.
+        """
+        stmt = select(AccountabilityPlan).where(AccountabilityPlan.status == PlanStatus.ACTIVE)
+        res = await db.execute(stmt)
+        active_plans = res.scalars().all()
+        
+        for plan in active_plans:
+            await PlanService.evaluate_plan_status(db, plan)
+        await db.commit()
