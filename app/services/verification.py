@@ -56,7 +56,7 @@ class VerificationService:
             
         # Dynamically test ALL pending records
         for rec in pending_records:
-            is_valid = await OTPService.verify_otp(rec.id, otp_code)
+            is_valid = await OTPService.verify_otp(db, rec.id, otp_code)
             if is_valid:
                 # Mark Success
                 rec.status = SessionStatus.VERIFIED

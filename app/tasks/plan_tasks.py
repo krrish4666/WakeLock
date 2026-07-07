@@ -90,8 +90,9 @@ async def _drop_random_otp_async(attendance_id: int, user_id: int):
     # Generate OTP
     otp_code = OTPService.generate_code()
     
-    # Store in Redis (2 mins TTL)
-    await OTPService.store_otp(attendance_id, otp_code, ttl_minutes=2)
+    # Store in Redis and persist hash in PostgreSQL
+    async with AsyncSessionLocal() as db:
+        await OTPService.store_otp(db, attendance_id, otp_code, ttl_minutes=2)
     
     # Send via Bot
     message = (
