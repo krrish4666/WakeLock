@@ -100,3 +100,29 @@ async def _drop_random_otp_async(attendance_id: int, user_id: int):
         f"You have exactly 2 MINUTES to reply to this bot with the code to save your penalty!"
     )
     await send_alert(user_id, message)
+    
+    # Schedule automated expiry check exactly 2 minutes (120 seconds) later
+    process_expired_otp.apply_async(args=[attendance_id, user_id], countdown=120)
+
+@shared_task
+def process_expired_otp(attendance_id: int, user_id: int):
+    """ Triggered exactly 2 minutes after OTP drop to check if user verified in time. """
+    asyncio.run(_process_expired_otp_async(attendance_id, user_id))
+
+async def _process_expired_otp_async(attendance_id: int, user_id: int):
+    async with AsyncSessionLocal() as db:
+        from app.services.verification import VerificationService
+        failed = await VerificationService.process_session_failure(db, attendance_id)
+        if failed:
+            record = await db.get(WakeSession, attendance_id)
+            plan = await db.get(AccountabilityPlan, record.plan_id) if record else None
+            penalty = plan.per_day_penalty if plan else "your daily penalty"
+            message = (
+                f"❌ WAKELOCK FAILED ❌\n\n"
+                f"Your 2-minute OTP window expired without verification!\n"
+                f"A penalty of Rs. {penalty} has been deducted from your locked balance."
+            )
+            try:
+                await send_alert(user_id, message)
+            except Exception as e:
+                print(f"[WARN] Could not send Telegram alert to {user_id}: {e}")

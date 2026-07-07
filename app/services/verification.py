@@ -60,6 +60,7 @@ class VerificationService:
             if is_valid:
                 # Mark Success
                 rec.status = SessionStatus.VERIFIED
+                rec.processed_flag = True
                 plan = await db.get(AccountabilityPlan, rec.plan_id)
                 plan.days_verified += 1
                 await db.commit()
@@ -67,6 +68,26 @@ class VerificationService:
                     
         # If no pending record accepted the OTP code:
         return "[ERROR] Invalid or Expired OTP! If it expired, the penalty will be applied."
+
+    @staticmethod
+    async def process_session_failure(db: AsyncSession, session_id: int) -> bool:
+        """
+        Marks a specific WakeSession as FAILED if it is still unverified/pending, and applies the daily penalty.
+        Idempotent via processed_flag and status check.
+        """
+        record = await db.get(WakeSession, session_id)
+        if not record or record.status != SessionStatus.PENDING or record.processed_flag:
+            return False
+            
+        record.status = SessionStatus.FAILED
+        record.processed_flag = True
+        
+        plan = await db.get(AccountabilityPlan, record.plan_id)
+        if plan:
+            await WalletService.apply_penalty(db, plan.user_id, plan.id, plan.per_day_penalty)
+            
+        await db.commit()
+        return True
 
     @staticmethod
     async def process_penalties(db: AsyncSession, date: datetime.date):
@@ -86,6 +107,7 @@ class VerificationService:
         
         for record in pending_records.scalars().all():
             record.status = SessionStatus.FAILED
+            record.processed_flag = True
             
             # Fetch plan to get penalty
             plan = await db.get(AccountabilityPlan, record.plan_id)
