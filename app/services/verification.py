@@ -1,6 +1,6 @@
-import datetime
+from datetime import datetime, date
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_
+from sqlalchemy import select, and_, func
 
 from app.models.user import User
 from app.models.plan import AccountabilityPlan, PlanStatus, WakeSession, SessionStatus
@@ -33,17 +33,12 @@ class VerificationService:
         if not active_plans:
             return "No active OTP request found for today. Your alarm hasn't dropped a code yet, or it was already verified/failed."
             
-        # Find today's AttendanceRecord (Pending) across ANY of the active plans
-        today = datetime.now().date()
-        today_start = datetime.combine(today, datetime.min.time()) # Match SQLite DateTime format
-
         pending_records = []
         for plan in active_plans:
             records = await db.execute(
                 select(WakeSession).where(
                     and_(
                         WakeSession.plan_id == plan.id,
-                        WakeSession.date == today_start,
                         WakeSession.status == SessionStatus.PENDING
                     )
                 )
@@ -92,7 +87,7 @@ class VerificationService:
         return True
 
     @staticmethod
-    async def process_penalties(db: AsyncSession, date: datetime.date):
+    async def process_penalties(db: AsyncSession, target_date: date):
         """
         Sweep all PENDING records for a given date, mark them FAILED, and apply wallet penalties.
         Called via Celery after the buffer window ends.
@@ -101,7 +96,7 @@ class VerificationService:
         pending_records = await db.execute(
             select(WakeSession).where(
                 and_(
-                    WakeSession.date == date,
+                    WakeSession.date == target_date,
                     WakeSession.status == SessionStatus.PENDING
                 )
             )
