@@ -1,0 +1,40 @@
+version: '3.8'
+
+services:
+  # 1. FastAPI API Server + Telegram Bot Polling Engine
+  api:
+    build: .
+    command: python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+    env_file: .env
+    ports:
+      - "8000:8000"
+    depends_on:
+      - redis
+    restart: always
+
+  # 2. Celery Worker (Executes alarms, OTP drops, penalties, completion)
+  worker:
+    build: .
+    command: python -m celery -A app.worker.celery_app worker --loglevel=info -P threads
+    env_file: .env
+    depends_on:
+      - redis
+      - api
+    restart: always
+
+  # 3. Celery Beat Scheduler (Monitors clock every minute)
+  beat:
+    build: .
+    command: python -m celery -A app.worker.celery_app beat --loglevel=info
+    env_file: .env
+    depends_on:
+      - redis
+      - api
+    restart: always
+
+  # 4. Local/Self-hosted Redis Server (Omit or comment out if using cloud Upstash/Railway Redis)
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    restart: always
