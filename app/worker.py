@@ -13,10 +13,10 @@ celery_app = Celery(
 
 celery_app.conf.update(
     broker_use_ssl={
-        "ssl_cert_reqs": "CERT_REQUIRED",
+        "ssl_cert_reqs": "required",
     },
     redis_backend_use_ssl={
-        "ssl_cert_reqs": "CERT_REQUIRED",
+        "ssl_cert_reqs": "required",
     },
     task_serializer="json",
     accept_content=["json"],
