@@ -81,55 +81,73 @@ async def _process_due_alarms_async():
             random_window_delay = random.randint(0, window_mins * 60)
             total_delay_seconds = (buffer_mins * 60) + random_window_delay
             
-            # Schedule the drop dynamically using celery countdown (safe from timezone mismatches)
-            drop_random_otp.apply_async(args=[record.id, plan.user_id], countdown=total_delay_seconds)
+            # Store the absolute future time in PostgreSQL
+            drop_time = user_now + timedelta(seconds=total_delay_seconds)
+            record.scheduled_otp_drop_time = drop_time
+            await db.commit()
+            
+        # Sweep for pending scheduled OTP drops
+        from app.models.plan import OTPToken
+        from sqlalchemy import func
+        due_otps = await db.execute(
+            select(WakeSession, AccountabilityPlan)
+            .join(AccountabilityPlan, WakeSession.plan_id == AccountabilityPlan.id)
+            .outerjoin(OTPToken, WakeSession.id == OTPToken.session_id)
+            .where(
+                and_(
+                    AccountabilityPlan.status == PlanStatus.ACTIVE,
+                    WakeSession.scheduled_otp_drop_time <= func.now(),
+                    WakeSession.status == SessionStatus.PENDING,
+                    OTPToken.id.is_(None)
+                )
+            )
+        )
         
-@shared_task
-def drop_random_otp(attendance_id: int, user_id: int):
-    """ Triggered randomly inside the buffer window to drop the OTP. """
-    asyncio.run(_drop_random_otp_async(attendance_id, user_id))
-
-async def _drop_random_otp_async(attendance_id: int, user_id: int):
-    # Generate OTP
-    otp_code = OTPService.generate_code()
-    
-    # Store in Redis and persist hash in PostgreSQL
-    async with AsyncSessionLocal() as db:
-        await OTPService.store_otp(db, attendance_id, otp_code, ttl_minutes=2)
-    
-    # Send via Bot
-    message = (
-        f"🚨 WAKELOCK OTP DROP 🚨\n\n"
-        f"Your code is: {otp_code}\n\n"
-        f"You have exactly 2 MINUTES to reply to this bot with the code to save your penalty!"
-    )
-    await send_alert(user_id, message)
-    
-    # Schedule automated expiry check exactly 2 minutes (120 seconds) later
-    process_expired_otp.apply_async(args=[attendance_id, user_id], countdown=120)
-
-@shared_task
-def process_expired_otp(attendance_id: int, user_id: int):
-    """ Triggered exactly 2 minutes after OTP drop to check if user verified in time. """
-    asyncio.run(_process_expired_otp_async(attendance_id, user_id))
-
-async def _process_expired_otp_async(attendance_id: int, user_id: int):
-    async with AsyncSessionLocal() as db:
-        from app.services.verification import VerificationService
-        failed = await VerificationService.process_session_failure(db, attendance_id)
-        if failed:
-            record = await db.get(WakeSession, attendance_id)
-            plan = await db.get(AccountabilityPlan, record.plan_id) if record else None
-            penalty = plan.per_day_penalty if plan else "your daily penalty"
+        for session, plan in due_otps.all():
+            otp_code = OTPService.generate_code()
+            
+            # Store the expiry time for the sweep BEFORE storing OTP so it commits together
+            from datetime import timezone
+            session.otp_expiry_time = datetime.now(timezone.utc) + timedelta(minutes=2)
+            
+            await OTPService.store_otp(db, session.id, otp_code, ttl_minutes=2)
+            
             message = (
-                f"❌ WAKELOCK FAILED ❌\n\n"
-                f"Your 2-minute OTP window expired without verification!\n"
-                f"A penalty of Rs. {penalty} has been deducted from your locked balance."
+                f"🚨 WAKELOCK OTP DROP 🚨\n\n"
+                f"Your code is: {otp_code}\n\n"
+                f"You have exactly 2 MINUTES to reply to this bot with the code to save your penalty!"
             )
             try:
-                await send_alert(user_id, message)
+                await send_alert(plan.user_id, message)
             except Exception as e:
-                print(f"[WARN] Could not send Telegram alert to {user_id}: {e}")
+                print(f"[ERROR] Failed to send Telegram alert for OTP drop to {plan.user_id}: {e}")
+            
+        # Sweep for pending expired OTPs
+        expired_sessions = await db.execute(
+            select(WakeSession).where(
+                and_(
+                    WakeSession.otp_expiry_time <= func.now(),
+                    WakeSession.status == SessionStatus.PENDING,
+                    WakeSession.processed_flag == False
+                )
+            )
+        )
+        
+        for record in expired_sessions.scalars().all():
+            from app.services.verification import VerificationService
+            failed = await VerificationService.process_session_failure(db, record.id)
+            if failed:
+                plan = await db.get(AccountabilityPlan, record.plan_id)
+                penalty = plan.per_day_penalty if plan else "your daily penalty"
+                message = (
+                    f"❌ WAKELOCK FAILED ❌\n\n"
+                    f"Your 2-minute OTP window expired without verification!\n"
+                    f"A penalty of Rs. {penalty} has been deducted from your locked balance."
+                )
+                try:
+                    await send_alert(plan.user_id, message)
+                except Exception as e:
+                    print(f"[WARN] Could not send Telegram alert for failed session {record.id}: {e}")
 
 @shared_task
 def check_completed_plans():
@@ -140,3 +158,4 @@ async def _check_completed_plans_async():
     async with AsyncSessionLocal() as db:
         from app.services.plan import PlanService
         await PlanService.process_completed_plans(db)
+

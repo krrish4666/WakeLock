@@ -58,6 +58,7 @@ class WakeSession(Base):
     
     attempts = Column(Integer, default=0)
     otp_expiry_time = Column(DateTime(timezone=True), nullable=True)
+    scheduled_otp_drop_time = Column(DateTime(timezone=True), nullable=True)
     
     processed_flag = Column(Boolean, default=False) # Idempotency lock
     created_at = Column(DateTime(timezone=True), server_default=func.now())
