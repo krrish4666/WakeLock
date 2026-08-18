@@ -13,12 +13,10 @@ def process_due_alarms():
     asyncio.run(_process_due_alarms_async())
 
 async def _process_due_alarms_async():
-    now = datetime.now()
-    current_time = now.time().replace(second=0, microsecond=0)
-    
     async with AsyncSessionLocal() as db:
         from sqlalchemy import select, and_
         from app.models.user import UserPreference
+        from zoneinfo import ZoneInfo
         
         # Fetch all active plans and their associated preferences
         result = await db.execute(
@@ -28,7 +26,6 @@ async def _process_due_alarms_async():
         )
         active_plans = result.all()
         
-        is_weekend = now.weekday() >= 5 # 5=Sat, 6=Sun
         processed_user_ids = set()
         
         for plan, pref in active_plans:
@@ -36,14 +33,20 @@ async def _process_due_alarms_async():
             if plan.user_id in processed_user_ids:
                 continue
                 
-            # Determine correct alarm time based on day
+            # Evaluate current time in user's specific timezone
+            user_tz = ZoneInfo(pref.timezone or "Asia/Kolkata")
+            user_now = datetime.now(user_tz)
+            user_current_time = user_now.time().replace(second=0, microsecond=0)
+            
+            # Determine correct alarm time based on user's local day
+            is_weekend = user_now.weekday() >= 5 # 5=Sat, 6=Sun
             assigned_alarm = pref.weekend_alarm_time if (is_weekend and pref.weekend_alarm_time) else pref.default_alarm_time
             
-            if assigned_alarm != current_time:
+            if assigned_alarm != user_current_time:
                 continue
                 
-            # Check if record already exists for today to ensure idempotency
-            today = now.date()
+            # Check if record already exists for user's today to ensure idempotency
+            today = user_now.date()
             record_exists = await db.execute(
                 select(WakeSession).where(
                     and_(
