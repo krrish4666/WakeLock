@@ -1,6 +1,6 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from datetime import datetime, timedelta, time
+from datetime import datetime, timedelta, time, timezone
 from decimal import Decimal
 import logging
 
@@ -47,7 +47,7 @@ class PlanService:
         )
 
         # Create Plan
-        start_date = datetime.now()
+        start_date = datetime.now(timezone.utc)
         end_date = start_date + timedelta(days=duration_days)
 
         new_plan = AccountabilityPlan(
