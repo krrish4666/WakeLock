@@ -73,7 +73,7 @@ async def _process_due_alarms_async():
             # Send initial wakeup alert
             buffer_mins = pref.buffer_duration_minutes
             window_mins = pref.otp_window_duration_minutes
-            msg = f"🚨 WAKE UP! Your alarm for {current_time.strftime('%H:%M')} is ringing! An OTP will drop during a {window_mins}-min window AFTER your {buffer_mins}-min buffer. STAY ALERT!"
+            msg = f"🚨 WAKE UP! Your alarm for {user_current_time.strftime('%H:%M')} is ringing! An OTP will drop during a {window_mins}-min window AFTER your {buffer_mins}-min buffer. STAY ALERT!"
             await send_alert(plan.user_id, msg)
             
             # Calculate Randomized Drop Time
